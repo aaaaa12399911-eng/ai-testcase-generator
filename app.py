@@ -1,42 +1,153 @@
 import streamlit as st
 import pandas as pd
 
-st.set_page_config(page_title="AI Testcase Generator", layout="wide")
+# ---------- Seiteneinstellungen ----------
+st.set_page_config(
+    page_title="AI Testcase Generator",
+    layout="wide"
+)
 
-st.title("AI Testcase Generator")
-st.caption("Gib eine User Story ein und erhalte strukturierte Testfälle und Test-User. (Demo Oberfläche)")
+# ---------- Custom CSS für moderneres UI ----------
+st.markdown(
+    """
+    <style>
+    /* Hintergrund & Schrift */
+    body {
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+                     system-ui, -system-ui, sans-serif;
+        background: radial-gradient(circle at top left, #f5f7ff, #ffffff);
+    }
+    .main {
+        padding-top: 1.5rem;
+    }
 
-st.markdown("---")
+    /* Überschrift */
+    .app-header {
+        font-size: 2.1rem;
+        font-weight: 700;
+        letter-spacing: 0.03em;
+        margin-bottom: 0.2rem;
+    }
+    .app-subtitle {
+        font-size: 0.95rem;
+        color: #6b7280;
+        margin-bottom: 1.5rem;
+    }
 
-col_input, col_output = st.columns([1, 2])
+    /* Karten-Layout */
+    .card {
+        background: #ffffff;
+        border-radius: 18px;
+        padding: 1.4rem 1.6rem;
+        box-shadow:
+            0 12px 30px rgba(15, 23, 42, 0.08),
+            0 1px 2px rgba(15, 23, 42, 0.05);
+        border: 1px solid rgba(148, 163, 184, 0.3);
+    }
 
-with col_input:
-    st.subheader("Eingabe")
+    /* Spaltentitel */
+    .card-title {
+        font-size: 1.2rem;
+        font-weight: 600;
+        margin-bottom: 0.8rem;
+    }
+
+    /* Button etwas moderner */
+    .stButton>button {
+        border-radius: 999px;
+        padding: 0.5rem 1.6rem;
+        font-weight: 600;
+        border: none;
+        background: linear-gradient(135deg, #6366f1, #ec4899);
+        color: white;
+        box-shadow: 0 8px 20px rgba(79, 70, 229, 0.4);
+        transition: all 0.15s ease-in-out;
+    }
+    .stButton>button:hover {
+        box-shadow: 0 10px 25px rgba(79, 70, 229, 0.5);
+        transform: translateY(-1px);
+    }
+
+    /* Multiselect-Chips */
+    .stMultiSelect [data-baseweb="tag"] {
+        border-radius: 999px !important;
+        background: rgba(79, 70, 229, 0.08) !important;
+        color: #1f2933 !important;
+    }
+
+    /* Tabs */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 0.3rem;
+    }
+    .stTabs [data-baseweb="tab"] {
+        border-radius: 999px;
+        padding: 0.25rem 1.1rem;
+    }
+
+    /* Dataframe-Wrapper */
+    [data-testid="stDataFrame"] {
+        border-radius: 14px;
+        overflow: hidden;
+        border: 1px solid rgba(148, 163, 184, 0.5);
+    }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+# ---------- Header ----------
+st.markdown(
+    """
+    <div>
+        <div class="app-header">🔍 AI Testcase Generator</div>
+        <div class="app-subtitle">
+            Gib eine User Story ein und generiere strukturierte Testfälle &
+            Test-User für dein QA-Team.
+        </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+st.markdown("")
+
+# ---------- Layout ----------
+left_col, right_col = st.columns([1, 1.25])
+
+# ---------- Eingabe-Karte ----------
+with left_col:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">Eingabe</div>', unsafe_allow_html=True)
 
     user_story = st.text_area(
         "User Story",
         placeholder="Als [Rolle] möchte ich [Funktion], um [Nutzen] ...",
-        height=220
+        height=260,
+        label_visibility="visible",
     )
 
     test_types = st.multiselect(
         "Welche Testarten möchtest du generieren?",
         ["Positive", "Negative", "Edge"],
-        default=["Positive", "Negative", "Edge"]
+        default=["Positive", "Negative", "Edge"],
     )
 
     generate = st.button("Testfälle generieren")
 
-with col_output:
-    st.subheader("Ausgabe")
+    st.markdown("</div>", unsafe_allow_html=True)
+
+# ---------- Ausgabe-Karte ----------
+with right_col:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
+    st.markdown('<div class="card-title">Ausgabe</div>', unsafe_allow_html=True)
 
     if not generate:
-        st.info("Gib links eine User Story ein und klicke auf 'Testfälle generieren'.")
+        st.info("Gib links eine User Story ein und klicke auf **„Testfälle generieren“**.")
     else:
         if not user_story.strip():
             st.warning("Bitte zuerst eine User Story eingeben.")
         else:
-            # --- Demo-Testfälle ---
+            # --- Demo-Testfälle (Platzhalter, später KI) ---
             testcases_data = [
                 {
                     "ID": "TC-001",
@@ -59,18 +170,15 @@ with col_output:
                 {
                     "ID": "TC-003",
                     "Kategorie": "Edge",
-                    "Titel": "Maximale Versicherungs­summe",
+                    "Titel": "Maximale Versicherungssumme",
                     "Vorbedingungen": "User eingeloggt",
-                    "Testschritte": "1. App öffnen\n2. maximale Versicherungs­summe eingeben\n3. speichern",
+                    "Testschritte": "1. App öffnen\n2. maximale Versicherungssumme eingeben\n3. speichern",
                     "Erwartetes Ergebnis": "Versicherung wird akzeptiert, keine Fehlermeldung",
                     "Priorität": "Mittel",
                 },
             ]
 
-            # Nach gewählten Kategorien filtern
-            testcases_data = [
-                tc for tc in testcases_data if tc["Kategorie"] in test_types
-            ]
+            testcases_data = [tc for tc in testcases_data if tc["Kategorie"] in test_types]
 
             df_testcases = pd.DataFrame(testcases_data)
 
@@ -101,3 +209,5 @@ with col_output:
             with tab2:
                 st.markdown("**Generierte Test-User / Personas (Demo)**")
                 st.dataframe(df_personas, use_container_width=True)
+
+    st.markdown("</div>", unsafe_allow_html=True)
