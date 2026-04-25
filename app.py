@@ -1,7 +1,11 @@
 import json
+import io
+import zipfile
 import streamlit as st
 import pandas as pd
+import numpy as np
 from openai import OpenAI
+from PIL import Image
 
 # ---------- OpenAI Client ----------
 # API-Key kommt aus Streamlit Secrets (nicht im Code speichern)
@@ -168,6 +172,151 @@ st.markdown(
 
 st.markdown("")
 
+# ---------- 3D-Asset-Funktionen ----------
+def _build_relief_obj_from_image(
+    image: Image.Image,
+    max_resolution: int = 192,
+    depth_scale: float = 0.25,
+):
+    """
+    Erstellt ein einfaches 3D-Relief-Mesh (OBJ) aus einem Bild.
+    Ausgabe: OBJ + MTL + Textur als ZIP (bytes) inklusive Metadaten.
+    """
+    img = image.convert("RGB")
+    width, height = img.size
+    longest = max(width, height)
+    if longest > max_resolution:
+        scale = max_resolution / float(longest)
+        new_size = (max(2, int(width * scale)), max(2, int(height * scale)))
+        img = img.resize(new_size, Image.Resampling.LANCZOS)
+
+    w, h = img.size
+    rgb = np.asarray(img).astype(np.float32) / 255.0
+    gray = rgb.mean(axis=2)
+
+    # Normiertes Height-Field
+    z_map = (gray - gray.min()) / (gray.max() - gray.min() + 1e-8)
+    z_map = z_map * depth_scale
+
+    # Vertices (Top + Bottom)
+    vertices = []
+    uvs = []
+
+    for y in range(h):
+        for x in range(w):
+            xf = (x / (w - 1)) - 0.5
+            yf = 0.5 - (y / (h - 1))
+            zf = float(z_map[y, x])
+            vertices.append((xf, yf, zf))
+            uvs.append((x / (w - 1), 1.0 - y / (h - 1)))
+
+    top_count = len(vertices)
+    for y in range(h):
+        for x in range(w):
+            xf = (x / (w - 1)) - 0.5
+            yf = 0.5 - (y / (h - 1))
+            vertices.append((xf, yf, 0.0))
+
+    faces = []
+
+    def top_idx(x, y):
+        return y * w + x
+
+    def bottom_idx(x, y):
+        return top_count + y * w + x
+
+    # Top surface
+    for y in range(h - 1):
+        for x in range(w - 1):
+            a = top_idx(x, y)
+            b = top_idx(x + 1, y)
+            c = top_idx(x, y + 1)
+            d = top_idx(x + 1, y + 1)
+            faces.append((a, c, b))
+            faces.append((b, c, d))
+
+    # Bottom surface
+    for y in range(h - 1):
+        for x in range(w - 1):
+            a = bottom_idx(x, y)
+            b = bottom_idx(x + 1, y)
+            c = bottom_idx(x, y + 1)
+            d = bottom_idx(x + 1, y + 1)
+            faces.append((a, b, c))
+            faces.append((b, d, c))
+
+    # Seiten schließen
+    for x in range(w - 1):  # top edge
+        t1, t2 = top_idx(x, 0), top_idx(x + 1, 0)
+        b1, b2 = bottom_idx(x, 0), bottom_idx(x + 1, 0)
+        faces.append((t1, t2, b1))
+        faces.append((t2, b2, b1))
+
+    for x in range(w - 1):  # bottom edge
+        t1, t2 = top_idx(x, h - 1), top_idx(x + 1, h - 1)
+        b1, b2 = bottom_idx(x, h - 1), bottom_idx(x + 1, h - 1)
+        faces.append((t1, b1, t2))
+        faces.append((t2, b1, b2))
+
+    for y in range(h - 1):  # left edge
+        t1, t2 = top_idx(0, y), top_idx(0, y + 1)
+        b1, b2 = bottom_idx(0, y), bottom_idx(0, y + 1)
+        faces.append((t1, b1, t2))
+        faces.append((t2, b1, b2))
+
+    for y in range(h - 1):  # right edge
+        t1, t2 = top_idx(w - 1, y), top_idx(w - 1, y + 1)
+        b1, b2 = bottom_idx(w - 1, y), bottom_idx(w - 1, y + 1)
+        faces.append((t1, t2, b1))
+        faces.append((t2, b2, b1))
+
+    # OBJ / MTL bauen
+    obj_lines = ["mtllib asset.mtl", "usemtl material_0"]
+    for vx, vy, vz in vertices:
+        obj_lines.append(f"v {vx:.6f} {vy:.6f} {vz:.6f}")
+    for u, v in uvs:
+        obj_lines.append(f"vt {u:.6f} {v:.6f}")
+
+    # Für Bottom-Vertices dieselben UVs wiederverwenden
+    for u, v in uvs:
+        obj_lines.append(f"vt {u:.6f} {v:.6f}")
+
+    # v/vt faces (1-indexed)
+    for a, b, c in faces:
+        # UV-Index 1:1 Vertex-Index
+        a1, b1, c1 = a + 1, b + 1, c + 1
+        obj_lines.append(f"f {a1}/{a1} {b1}/{b1} {c1}/{c1}")
+
+    mtl = "\n".join(
+        [
+            "newmtl material_0",
+            "Ka 1.000 1.000 1.000",
+            "Kd 1.000 1.000 1.000",
+            "Ks 0.000 0.000 0.000",
+            "d 1.0",
+            "illum 2",
+            "map_Kd texture.png",
+        ]
+    )
+    obj = "\n".join(obj_lines)
+
+    texture_bytes = io.BytesIO()
+    img.save(texture_bytes, format="PNG")
+    texture_bytes.seek(0)
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("asset.obj", obj)
+        zf.writestr("asset.mtl", mtl)
+        zf.writestr("texture.png", texture_bytes.getvalue())
+    archive.seek(0)
+
+    return archive.getvalue(), {
+        "vertices": len(vertices),
+        "faces": len(faces),
+        "texture_size": f"{w}x{h}",
+    }
+
 # ---------- KI-Funktion ----------
 
 def generate_tests_with_ai(user_story: str, selected_types: list):
@@ -299,7 +448,47 @@ Gib das Ergebnis exakt in folgendem JSON-Format zurück:
 
     return df_tc, df_p
 
-# ---------- Layout ----------
+# ---------- 3D Asset Generator ----------
+st.markdown("### 3D Asset aus Bild generieren")
+st.caption("Lädt ein einzelnes Bild hoch und erzeugt ein texturiertes OBJ-Mesh (Relief) als ZIP.")
+
+asset_left, asset_right = st.columns([1, 1.2])
+with asset_left:
+    uploaded_image = st.file_uploader(
+        "Bild für 3D-Asset",
+        type=["png", "jpg", "jpeg", "webp"],
+        help="Für beste Resultate: Objekt klar sichtbar, wenig Bewegungsunschärfe.",
+    )
+    mesh_resolution = st.slider("Max. Mesh-Auflösung", min_value=64, max_value=320, value=192, step=16)
+    depth_scale = st.slider("Relief-Tiefe", min_value=0.05, max_value=0.50, value=0.25, step=0.01)
+    generate_asset = st.button("3D Asset generieren")
+
+with asset_right:
+    if uploaded_image is not None:
+        preview = Image.open(uploaded_image)
+        st.image(preview, caption="Vorschau")
+    if generate_asset and uploaded_image is not None:
+        source_img = Image.open(uploaded_image)
+        with st.spinner("Erzeuge 3D-Asset …"):
+            zip_bytes, meta = _build_relief_obj_from_image(
+                source_img,
+                max_resolution=mesh_resolution,
+                depth_scale=depth_scale,
+            )
+        st.success("3D-Asset erstellt. Du kannst das ZIP direkt herunterladen.")
+        st.write(f"Vertices: **{meta['vertices']}** | Faces: **{meta['faces']}** | Textur: **{meta['texture_size']}**")
+        st.download_button(
+            "Download asset.zip",
+            data=zip_bytes,
+            file_name="asset.zip",
+            mime="application/zip",
+        )
+    elif generate_asset:
+        st.warning("Bitte zuerst ein Bild hochladen.")
+
+st.markdown("---")
+
+# ---------- Testcase-Layout ----------
 left_col, right_col = st.columns([1, 1.25])
 
 with left_col:
